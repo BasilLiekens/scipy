@@ -424,8 +424,6 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
             } else if (upper_band == 0) {
                 slice_structure = St::LOWER_TRIANGULAR;
                 uplo = 'L';
-            } else if (upper_band + lower_band < n) {
-                slice_structure = St::BANDED;
             } else {
                 // Check if symmetric/hermitian
                 std::tie(is_symm_or_herm, is_symm_not_herm) = is_sym_herm(data, n);
