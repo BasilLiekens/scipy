@@ -8,7 +8,6 @@ import warnings
 from warnings import warn
 from itertools import product
 import numpy as np
-from numpy import atleast_1d, atleast_2d
 from scipy._lib._util import _apply_over_batch
 from .lapack import get_lapack_funcs, _compute_lwork, _normalize_lapack_dtype
 from ._misc import LinAlgError, _datacopied, LinAlgWarning
