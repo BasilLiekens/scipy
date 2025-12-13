@@ -877,6 +877,25 @@ bandwidth(T* data, npy_intp n, npy_intp m, npy_intp* lower_band, npy_intp* upper
     *upper_band = ub;
 }
 
+template<typename T>
+void
+detect_bandwidths(T* data, npy_intp ndim, npy_intp outer_size, npy_intp *shape, npy_intp *strides, npy_intp *kl, npy_intp *ku, npy_intp *kl_max, npy_intp *ku_max) {
+    // Looping mechanism copied from `_solve`
+    for (npy_intp idx = 0; idx < outer_size; idx++) {
+        npy_intp offset = 0;
+        npy_intp temp_idx = idx;
+        for (int i = ndim - 3; i >= 0; i--) {
+            offset += (temp_idx % shape[i]) * strides[i];
+            temp_idx /= shape[i];
+        }
+
+        T* slice_ptr = (T *)(data + offset/sizeof(T));
+
+        bandwidth(slice_ptr, shape[ndim-2], shape[ndim-1], &kl[idx], &ku[idx]);
+        if (kl[idx] > *kl_max) {*kl_max = kl[idx];}
+        if (ku[idx] > *ku_max) {*ku_max = ku[idx];}
+    }
+}
 
 
 

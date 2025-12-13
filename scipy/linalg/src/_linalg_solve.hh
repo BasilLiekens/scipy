@@ -214,12 +214,13 @@ inline void solve_slice_banded(
     char norm = '1';
 
     // use `work` for storage, but first used as scratch memory
-    T *ab = &work[0];
+    T *scratch = &work[0];
+    T *ab = &work[N * N];
 
     // gbsv does not provide a direct means to work with transposes, so do it manually
     if (trans == 'T') {
         std::swap(kl, ku);
-        transpose(data, ab, N, N);
+        transpose(data, scratch, N, N);
     }
 
     CBLAS_INT ldab = 2 * kl + ku + 1;
@@ -312,6 +313,11 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
     npy_intp *strides_b = PyArray_STRIDES(ap_b);
     npy_intp nrhs = PyArray_DIM(ap_b, ndim_b -1); // Number of right-hand-sides
 
+    // Only used for `banded`
+    npy_intp *kls = NULL;
+    npy_intp *kus = NULL;
+    T *ab = NULL;
+
     // --------------------------------------------------------------------
     // Workspace computation and allocation
     // --------------------------------------------------------------------
@@ -380,6 +386,36 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
     }
     else if (structure == St::UPPER_TRIANGULAR) {
         uplo = 'U';
+    }
+    if (structure == St::BANDED) {
+        // Banded structure detection per slice
+        npy_intp kl_max = 0;
+        npy_intp ku_max = 0;
+        kls = (npy_intp *)malloc(outer_size * sizeof(T));
+        kus = (npy_intp *)malloc(outer_size * sizeof(T));
+
+        if (kls == NULL || kus == NULL) {
+            free(buffer);
+            free(ipiv);
+            free(kls);
+            free(kus);
+            info = -102;
+            return (int)info;
+        }
+
+        // slices not copied to Fortran yet, hence flip the bounds.
+        detect_bandwidths(Am_data, ndim, outer_size, shape, strides, kus, kls, &ku_max, &kl_max);
+
+        ab = (T *)malloc(((n + 2 * kl_max + ku_max + 1) * n + lwork) * sizeof(T));
+        if (ab == NULL) {
+            free(buffer);
+            free(ipiv);
+            free(kls);
+            free(kus);
+            free(ab);
+            info = -102;
+            return int(info);
+        }
     }
 
     // Main loop to traverse the slices
@@ -487,10 +523,8 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
             }
             case St::BANDED:
             {
-                // guard against the case where `assume_a` was set directly, but now runs this routine twice.
-                bandwidth(data, n, n, &lower_band, &upper_band);
-
-                solve_slice_banded(trans, intn, int_nrhs, data, ipiv, data_b, work, work2, irwork, lower_band, upper_band, slice_status);
+                // Bands were detected earlier on already
+                solve_slice_banded(trans, intn, int_nrhs, data, ipiv, data_b, ab, work2, irwork, kls[idx], kus[idx], slice_status);
 
                 if ((slice_status.lapack_info < 0) || (slice_status.is_singular)) {
                     vec_status.push_back(slice_status);
@@ -577,5 +611,10 @@ free_exit:
     free(buffer);
     free(irwork);
     free(ipiv);
+    if (kls != NULL) {
+        free(kls);
+        free(kus);
+        free(ab);
+    }
     return 1;
 }
