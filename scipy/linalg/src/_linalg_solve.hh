@@ -4,6 +4,7 @@
 #include "Python.h"
 #include <iostream>
 #include "numpy/arrayobject.h"
+#include "numpy/ndarraytypes.h"
 #include "numpy/npy_math.h"
 #include "npy_cblas.h"
 #include "_npymath.hh"
@@ -403,8 +404,12 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
             return (int)info;
         }
 
-        // slices not copied to Fortran yet, hence flip the bounds.
-        detect_bandwidths(Am_data, ndim, outer_size, shape, strides, kus, kls, &ku_max, &kl_max);
+        // If not F-ordered, the lower and upper bands will be flipped.
+        if (PyArray_IS_F_CONTIGUOUS(ap_Am)) {
+            detect_bandwidths(Am_data, ndim, outer_size, shape, strides, kls, kus, &kl_max, &ku_max);
+        } else {
+            detect_bandwidths(Am_data, ndim, outer_size, shape, strides, kus, kls, &ku_max, &kl_max);
+        }
 
         ab = (T *)malloc(((n + 2 * kl_max + ku_max + 1) * n + lwork) * sizeof(T));
         if (ab == NULL) {
