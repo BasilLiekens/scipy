@@ -244,7 +244,7 @@ def solve(a, b, lower=False, overwrite_a=False,
         a1 = a1.copy()
 
     if not (b1.flags['ALIGNED'] or b1.dtype.byteorder == '='):
-        overwrite_a = True
+        overwrite_b = True
         b1 = b1.copy()
 
     # align the shape of b with a: 1. make b1 at least 2D
