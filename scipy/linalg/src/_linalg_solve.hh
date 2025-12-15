@@ -231,6 +231,7 @@ inline void solve_slice_banded(
 
     gbsv(&N, &kl, &ku, &NRHS, ab, &ldab, ipiv, b_data, &N, &info);
     status.is_singular = (info > 0);
+    status.lapack_info = (Py_ssize_t)info;
 
     real_type rcond;
     real_type anorm = norm1_banded(data, kl, ku, work2, N);
