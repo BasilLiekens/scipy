@@ -218,23 +218,26 @@ inline void solve_slice_banded(
     T *scratch = &work[0];
     T *ab = &work[N * N];
 
-    // gbsv does not provide a direct means to work with transposes, so do it manually
+    // gbsv does not provide a direct means to work with transposes, so do it manually:
+    // data is always input in the same order, so hardcode strides.
     if (trans == 'T') {
         std::swap(kl, ku);
-        transpose(data, scratch, N, N);
+        swap_cf(data, scratch, N, N, N);
+    } else {
+        copy_slice(scratch, data, N, N, N * sizeof(T), sizeof(T));
     }
 
     CBLAS_INT ldab = 2 * kl + ku + 1;
 
     // get bands in correct structure, reuse `work` for storage
-    to_banded(data, N, kl, ku, ldab, ab);
+    to_banded(scratch, N, kl, ku, ldab, ab);
 
     gbsv(&N, &kl, &ku, &NRHS, ab, &ldab, ipiv, b_data, &N, &info);
     status.is_singular = (info > 0);
     status.lapack_info = (Py_ssize_t)info;
 
     real_type rcond;
-    real_type anorm = norm1_banded(data, kl, ku, work2, N);
+    real_type anorm = norm1_banded(scratch, kl, ku, work2, N);
     gbcon(&norm, &N, &kl, &ku, ab, &ldab, ipiv, &anorm, &rcond, work2, irwork, &info);
 
     status.rcond = (double)rcond;
@@ -434,8 +437,7 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
             temp_idx /= shape[i];
         }
         T* slice_ptr = (T *)(Am_data + (offset/sizeof(T)));
-        copy_slice(scratch, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]); // XXX: make it in one go
-        swap_cf(scratch, data, n, n, n);
+        copy_slice_F(data, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]);
 
         // copy the r.h.s, too; XXX: dedupe
         offset = 0;
