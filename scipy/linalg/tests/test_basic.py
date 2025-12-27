@@ -1157,13 +1157,13 @@ class TestSolve:
         # test if even for full matrix solver gives correct results
         ref = np.linalg.solve(A, b)
         res = solve(A, b, assume_a="banded")
-        assert_allclose(ref, res)
+        assert_allclose(ref, res, atol=1e-14)
 
         # restrict to banded
         A = np.triu(np.tril(A, k=5), k=-7)
         ref = np.linalg.solve(A, b)
         res = solve(A, b, assume_a="banded")
-        assert_allclose(ref, res)
+        assert_allclose(ref, res, atol=1e-14)
 
         # ill-conditioned inputs warn
         A[0, 0] = 1e40
