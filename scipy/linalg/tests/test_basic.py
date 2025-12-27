@@ -908,8 +908,8 @@ class TestSolve:
     @pytest.mark.parametrize('assume_a', ['diagonal', 'tridiagonal', 'banded',
                                           'lower triangular', 'upper triangular',
                                           'pos', 'positive definite',
-                                          'symmetric', 'hermitian', 'banded',
-                                          'general', 'sym', 'her', 'gen'])
+                                          'symmetric', 'hermitian', 'general',
+                                          'sym', 'her', 'gen'])
     @pytest.mark.parametrize('nrhs', [(), (5,)])
     @pytest.mark.parametrize('transposed', [True, False])
     @pytest.mark.parametrize('overwrite', [True, False])
