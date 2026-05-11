@@ -90,7 +90,7 @@ void invert_slice_cholesky(
 template<typename T>
 void invert_slice_sym_herm(
     char uplo, CBLAS_INT N, T *data, CBLAS_INT *ipiv, T *work, void *irwork, CBLAS_INT lwork,
-    bool is_symm_not_herm, 
+    bool is_symm_not_herm,
     SliceStatus& status
 ) {
     using real_type = typename detail::type_traits<T>::real_type;
@@ -268,7 +268,7 @@ _inverse(PyArrayObject* ap_Am, T* ret_data, St structure, int lower, int overwri
      * The memory strategy thus depends on the `overwrite_a` value.
      *
      * For `overwrite_a=False` (default), we:
-     *   - allocate a temp buffer (`scratch` and `data` below) once
+     *   - allocate a temp buffer (`data` below) once
      *   - for each slice, we
      *       - copy-and-transpose the slice into the temp buffer,
      *       - feed the buffer to LAPACK
@@ -285,22 +285,21 @@ _inverse(PyArrayObject* ap_Am, T* ret_data, St structure, int lower, int overwri
      * and `ret_data` will simply contain the result from the LAPACK call.
      *
      */
-    CBLAS_INT buf_size = overwrite_a ? lwork : 2*n*n + lwork;
+    CBLAS_INT buf_size = overwrite_a ? lwork : n*n + lwork;
 
     T* buffer = (T *)malloc(buf_size*sizeof(T));
     if (NULL == buffer) { info = -101; return (int)info; }
 
-    T *data=NULL, *scratch=NULL, *work=NULL;
+    T *data=NULL, *work=NULL;
     if (overwrite_a) {
-        // work in-place 
+        // work in-place
         data = ret_data;
         work = &buffer[0];
     }
     else {
         // Chop buffer into parts, one for data and one for work
         data = &buffer[0];
-        scratch = &buffer[n*n];
-        work = &buffer[2*n*n];
+        work = &buffer[n*n];
     }
 
     CBLAS_INT* ipiv = (CBLAS_INT *)malloc(n*sizeof(CBLAS_INT));
@@ -350,8 +349,7 @@ _inverse(PyArrayObject* ap_Am, T* ret_data, St structure, int lower, int overwri
         T *slice_ptr = compute_slice_ptr(idx, Am_data, ndim, shape, strides);
 
         if (!overwrite_a) {
-            copy_slice(scratch, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]); // XXX: make it in one go
-            swap_cf(scratch, data, n, n, n);
+            copy_slice_F(data, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]);
         }
 
         // detect the structure if not given
@@ -441,8 +439,7 @@ _inverse(PyArrayObject* ap_Am, T* ret_data, St structure, int lower, int overwri
                 else { // potrf failed
                     if(posdef_fallback) {
                         // restore
-                        copy_slice(scratch, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]);
-                        swap_cf(scratch, data, n, n, n);
+                        copy_slice_F(data, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]);
                         init_status(slice_status, idx, slice_structure);
 
                         // no break: fall back to the symmetric solver
@@ -510,4 +507,3 @@ free_exit:
 }
 
 } // namespace sp_linalg
-

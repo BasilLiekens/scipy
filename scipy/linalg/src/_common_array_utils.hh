@@ -1044,20 +1044,6 @@ T* compute_slice_ptr(npy_intp idx, T *Am_data, npy_intp ndim, npy_intp *shape, n
 
 
 /*
- * Copy n-by-m slice from slice_ptr to dst.
- */
-template<typename T>
-void copy_slice(T* dst, const T* slice_ptr, const npy_intp n, const npy_intp m, const npy_intp s2, const npy_intp s1) {
-
-    for (npy_intp i = 0; i < n; i++) {
-        for (npy_intp j = 0; j < m; j++) {
-            dst[i * m + j] = *(slice_ptr + (i*s2/sizeof(T)) + (j*s1/sizeof(T)));
-        }
-    }
-}
-
-
-/*
  * Copy n-by-m C-order slice from slice_ptr to dst in F-order.
  *
  * `src` is n-by-m, strided
@@ -1066,13 +1052,62 @@ void copy_slice(T* dst, const T* slice_ptr, const npy_intp n, const npy_intp m, 
  * The default is to have src and dst of the same size (ldb=-1 means ldb=n).
  */
 template<typename T>
-void copy_slice_F(T* dst, const T* slice_ptr, const npy_intp n, const npy_intp m, const npy_intp s2, const npy_intp s1, npy_intp ldb=-1) {
+void copy_slice_F(T* dst, const T* src, const npy_intp n, const npy_intp m, npy_intp s2, npy_intp s1, npy_intp ldb=-1) {
 
     if (ldb == -1) {ldb = n;}
 
-    for (npy_intp i = 0; i < n; i++) {
-        for (npy_intp j = 0; j < m; j++) {
-            dst[i + j*ldb] = *(slice_ptr + (i*s2/sizeof(T)) + (j*s1/sizeof(T)));  // == src[i*m + j]
+    // For larger matrices (n and/or m >= 8), the array is partitioned as:
+    // [       |   ]
+    // [   A   |   ]
+    // [       | C ]
+    // [-------|   ]
+    // [   B   |   ]
+
+    // where A is the largest (k*8)x(l*8) block, for some k <= n/8 and
+    // l <= m/8 and if exists, B is the bottom edge, C is the right pane.
+    s1 = s1 / sizeof(T);
+    s2 = s2 / sizeof(T);
+
+    // Round down to multiple of 8
+    const int n_max = n & ~7;
+    const int m_max = m & ~7;
+
+    // Main 8x8 blocks: reverse pattern (sequential writes, strided reads)
+    for (int rb = 0; rb < n_max; rb += 8) {
+        for (int cb = 0; cb < m_max; cb += 8) {
+            const T *src_origin = src + rb * s2 + cb * s1; // = src[rb, cb]
+            T *dst_origin = dst + rb + cb * ldb;
+            for (int i = 0; i < 8; i++) {
+                for (int j = 0; j < 8; j++) {
+                    dst_origin[i + j * ldb] = src_origin[i * s2 + j * s1]; // = src_origin[i, j]
+                }
+            }
+        }
+    }
+
+    // Handle B block if present (Bottom edge, remainder rows, columns of A)
+    if (n_max < n) {
+        const int n_remain = n - n_max;
+        for (int cb = 0; cb < m_max; cb += 8) {
+            const T *src_origin = src + n_max * s2 + cb * s1; // = src[n_max, cb]
+            T *dst_origin = dst + n_max + cb * ldb;
+            for (int i = 0; i < n_remain; i++) {
+                for (int j = 0; j < 8; j++) {
+                    dst_origin[i + j * ldb] = src_origin[i * s2 + j * s1];
+                }
+            }
+        }
+    }
+
+    // Handle C block if present (Right edge + corner, remainder columns, all rows)
+    if (m_max < m) {
+        const int m_remain = m - m_max;
+        for (int i = 0; i < n; i++) {
+            const T *src_row = src + i * s2 + m_max * s1; // = src[i, m_max]
+            T *dst_row = dst + i + m_max * ldb;
+            for (int j = 0; j < m_remain; j++) {
+                dst_row[j * ldb] = src_row[j * s1];
+            }
         }
     }
 }

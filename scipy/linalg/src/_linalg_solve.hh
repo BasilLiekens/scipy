@@ -490,7 +490,7 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
     CBLAS_INT buf_size_a = overwrite_a ? 0 : n*n;
     CBLAS_INT buf_size_b = overwrite_b ? 0 : n*nrhs;
     CBLAS_INT buf_size_trcon = 2*n; // // 2*n for tridiag trcon
-    CBLAS_INT buf_size = 2*buf_size_a + buf_size_b + buf_size_trcon + lwork; 
+    CBLAS_INT buf_size = buf_size_a + buf_size_b + buf_size_trcon + lwork;
 
     T* buffer = (T *)malloc(buf_size*sizeof(T));
     if (NULL == buffer) { info = -101; return (int)info; }
@@ -498,25 +498,24 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
     /*
      * Chop the buffer into parts:
      *
-     *    size_a     size_a    size_b     2n     lwork
-     * |----------|---------|----------|------|---------|
-     * ^          ^         ^          ^      ^
-     * scratch    data      data_b     work2  work
+     *    size_a    size_b     2n     lwork
+     * |---------|----------|------|---------|
+     * ^         ^          ^      ^
+     * data      data_b     work2  work
      *
-     * - scratch & data are for A (lhs)
+     * - data is for A (lhs)
      * - data_b is for b (rhs)
      * - work2 is for the tridiag solver, trcon's work array
      * - work is for all other LAPACK functions
      *
      */
 
-    T *scratch = NULL, *data = NULL;
+    T *data = NULL;
     if (overwrite_a) {
         data = (T *)Am_data;
     }
     else {
-        scratch = &buffer[0];
-        data = &buffer[buf_size_a];
+        data = &buffer[0];
     }
 
     T *data_b = NULL;
@@ -525,11 +524,11 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
         data_b = ret_data;
     }
     else {
-        data_b = &buffer[2*buf_size_a];
+        data_b = &buffer[buf_size_a];
     }
 
-    T *work2 = &buffer[2*buf_size_a + buf_size_b]; // 2*n for is for tridiag's trcon; XXX malloc it only if needed?
-    T* work = &buffer[2*buf_size_a + buf_size_b + 2*n];
+    T *work2 = &buffer[buf_size_a + buf_size_b]; // 2*n for is for tridiag's trcon; XXX malloc it only if needed?
+    T* work = &buffer[buf_size_a + buf_size_b + 2*n];
 
     CBLAS_INT* ipiv = (CBLAS_INT *)malloc(n*sizeof(CBLAS_INT));
     if (ipiv == NULL) {
@@ -575,8 +574,7 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
 
         if (!overwrite_a) {
             // copy the slice
-            copy_slice(scratch, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]); // XXX: make it in one go
-            swap_cf(scratch, data, n, n, n);
+            copy_slice_F(data, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]);
         }
 
         if (!overwrite_b) {
@@ -667,8 +665,7 @@ _solve(PyArrayObject* ap_Am, PyArrayObject *ap_b, T* ret_data, St structure, int
                 else { // potrf failed
                     if(posdef_fallback) {
                         // restore
-                        copy_slice(scratch, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]);
-                        swap_cf(scratch, data, n, n, n);
+                        copy_slice_F(data, slice_ptr, n, n, strides[ndim-2], strides[ndim-1]);
                         init_status(slice_status, idx, slice_structure);
 
                         // no break: fall back to the general solver
