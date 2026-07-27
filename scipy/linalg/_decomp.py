@@ -308,7 +308,6 @@ def eig(a, b=None, left=False, right=True, overwrite_a=False,
     return w, vr
 
 
-@_apply_over_batch(('a', 2), ('b', 2))
 def eigh(a, b=None, *, lower=True, eigvals_only=False, overwrite_a=False,
          overwrite_b=False, type=1, check_finite=True, subset_by_index=None,
          subset_by_value=None, driver=None):
@@ -485,39 +484,58 @@ def eigh(a, b=None, *, lower=True, eigvals_only=False, overwrite_a=False,
                          ''.format(driver, '", "'.join(drv_str[1:])))
 
     a1 = _asarray_validated(a, check_finite=check_finite)
-    if len(a1.shape) != 2 or a1.shape[0] != a1.shape[1]:
+    if len(a1.shape) < 2 or a1.shape[-2] != a1.shape[-1]:
         raise ValueError('expected square "a" matrix')
 
-    # accommodate square empty matrices
-    if a1.size == 0:
-        w_n, v_n = eigh(np.eye(2, dtype=a1.dtype))
+    _deprecate_dtypes("linalg.eigh", a1)
 
-        w = np.empty_like(a1, shape=(0,), dtype=w_n.dtype)
-        v = np.empty_like(a1, shape=(0, 0), dtype=v_n.dtype)
-        if eigvals_only:
-            return w
-        else:
-            return w, v
+    a1, overwrite_a = _normalize_lapack_dtype(a1, overwrite_a)
+    a1, overwrite_a = _ensure_aligned_and_native(a1, overwrite_a)
+    overwrite_a = overwrite_a or _datacopied(a1, a)
+    overwrite_a = overwrite_a and a1.ndim == 2 and a1.flags["F_CONTIGUOUS"]
 
-    overwrite_a = overwrite_a or (_datacopied(a1, a))
     cplx = True if iscomplexobj(a1) else False
-    n = a1.shape[0]
+    n = a1.shape[-1]
     drv_args = {'overwrite_a': overwrite_a}
 
     if b is not None:
         b1 = _asarray_validated(b, check_finite=check_finite)
+        _deprecate_dtypes("linalg.eigh", b1)
+
         overwrite_b = overwrite_b or _datacopied(b1, b)
-        if len(b1.shape) != 2 or b1.shape[0] != b1.shape[1]:
+        if len(b1.shape) < 2 or b1.shape[-2] != b1.shape[-1]:
             raise ValueError('expected square "b" matrix')
 
-        if b1.shape != a1.shape:
-            raise ValueError(f"wrong b dimensions {b1.shape}, should be {a1.shape}")
+        batch_shape = np.broadcast_shapes(a1.shape[:-2], b1.shape[:-2])
+        a1 = np.broadcast_to(a1, batch_shape + a1.shape[-2:])
+        b1 = np.broadcast_to(b1, batch_shape + b1.shape[-2:])
+
+        a1, b1 = _ensure_dtype_cdsz(a1, b1) # Let `b1` and `a1` upcast each other
+        b1, overwrite_b = _ensure_aligned_and_native(b1, overwrite_b)
+
+        # Deal with the case where `b` could still upcast `a`, hence recompute the flag
+        overwrite_a = overwrite_a or _datacopied(a1, a)
+        overwrite_a = overwrite_a and a1.ndim == 2 and a1.flags["F_CONTIGUOUS"]
+        overwrite_b = overwrite_b or _datacopied(b1, b)
+        overwrite_b = overwrite_b and b1.ndim == 2 and b1.flags["F_CONTIGUOUS"]
 
         if type not in [1, 2, 3]:
             raise ValueError('"type" keyword only accepts 1, 2, and 3.')
 
         cplx = True if iscomplexobj(b1) else (cplx or False)
-        drv_args.update({'overwrite_b': overwrite_b, 'itype': type})
+        drv_args.update(
+            {'overwrite_a': overwrite_a, 'overwrite_b': overwrite_b, 'itype': type}
+        )
+
+    # accommodate square empty matrices
+    if a1.size == 0:
+        w = np.empty(a1.shape[:-2] + (0,), dtype=np.finfo(a1.dtype).dtype)
+        if eigvals_only:
+            return w
+        else:
+            v = np.empty(a1.shape[:-2] + (0, 0), dtype=a1.dtype)
+            return w, v
+
 
     subset = (subset_by_index is not None) or (subset_by_value is not None)
 
@@ -571,6 +589,7 @@ def eigh(a, b=None, *, lower=True, eigvals_only=False, overwrite_a=False,
                   }
 
     if b is None:  # Standard problem
+        b1 = None
         drv, drvlw = get_lapack_funcs((pfx + driver, pfx+driver+'_lwork'),
                                       [a1])
         clw_args = {'n': n, 'lower': lower}
@@ -585,7 +604,6 @@ def eigh(a, b=None, *, lower=True, eigvals_only=False, overwrite_a=False,
             lwork_args = {'lwork': lw}
 
         drv_args.update({'lower': lower, 'compute_v': 0 if _job == "N" else 1})
-        w, v, *other_args, info = drv(a=a1, **drv_args, **lwork_args)
 
     else:  # Generalized problem
         # 'gvd' doesn't have lwork query
@@ -601,7 +619,15 @@ def eigh(a, b=None, *, lower=True, eigvals_only=False, overwrite_a=False,
 
         drv_args.update({'uplo': uplo, 'jobz': _job})
 
-        w, v, *other_args, info = drv(a=a1, b=b1, **drv_args, **lwork_args)
+    return _eigh(a1, b1, drv, drv_args, lwork_args, subset, eigvals_only, pfx, driver, n)
+
+
+@_apply_over_batch(('a', 2), ('b', 2))
+def _eigh(a, b, drv, drv_args, lwork_args, subset, eigvals_only, pfx, driver, n):
+    if b is not None:
+        w, v, *other_args, info = drv(a=a, b=b, **drv_args, **lwork_args)
+    else:
+        w, v, *other_args, info = drv(a=a, **drv_args, **lwork_args)
 
     # m is always the first extra argument
     w = w[:other_args[0]] if subset else w
