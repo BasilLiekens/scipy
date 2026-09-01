@@ -840,7 +840,7 @@ def _dirty_git_working_dir():
     )
 )
 @click.option(
-    '--dry-run/--no-dry-run', '-n', default=True,
+    '--dry-run/--no-dry-run', '-n', default=None,
     help="Run benchmarks without saving results to disk. "
 )
 @click.option(
@@ -892,7 +892,23 @@ def bench(ctx, tests, submodule, compare, verbose, quick,
     if quick:
         bench_args = ['--quick'] + bench_args
 
-    if dry_run:
+    # `dry_run` is not an option for `compare`, so check if both were specified
+    # using a sentinal value, error if so, and provide defaults otherwise.
+    if dry_run is not None:
+        if (dry_run is False or dry_run is True):
+            if compare:
+                raise click.ClickException(
+                    "`compare` and `dry_run` should not be set together"
+                )
+            else:
+                dry_run = True
+        else:
+            raise click.ClickException("`dry_run` should be a boolean")
+    else:
+        dry_run = True
+
+
+    if dry_run and not compare:
         bench_args = ['--dry-run'] + bench_args
 
     if len(array_api_backend) != 0:
