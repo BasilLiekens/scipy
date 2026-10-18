@@ -771,8 +771,8 @@ def _solve_toeplitz_signature(c, r, b, check_finite):
 @_apply_over_batch(('c', 1), ('r', 1), ('b', '1|2'),
                    signature=_solve_toeplitz_signature)
 def _solve_toeplitz(c, r, b, check_finite):
-    r, c, b, _, _ = _validate_args_for_toeplitz_ops(
-        (c, r), b, check_finite, keep_b_shape=True)
+    r, c, b, _, b_shape = _validate_args_for_toeplitz_ops(
+        (c, r), b, check_finite, keep_b_shape=False)
 
     # Form a 1-D array of values to be used in the matrix, containing a
     # reversed copy of r[1:], followed by c.
@@ -780,14 +780,8 @@ def _solve_toeplitz(c, r, b, check_finite):
     if b is None:
         raise ValueError('illegal value, `b` is a required argument')
 
-    if b.ndim == 1:
-        x, _ = levinson(vals, np.ascontiguousarray(b))
-    else:
-        x = np.column_stack([levinson(vals, np.ascontiguousarray(b[:, i]))[0]
-                             for i in range(b.shape[1])])
-        x = x.reshape(*b.shape)
-
-    return x
+    x, _ = levinson(vals, b)
+    return x if len(b_shape) >= 2 else x[:, 0]
 
 
 def _get_axis_len(aname, a, axis):
