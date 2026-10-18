@@ -13,17 +13,17 @@ cdef fused dz:
     complex128_t
 
 
-def levinson(const dz[::1] a, const dz[::1] b):
+def levinson(const dz[::1] a, const dz[:, :] b):
     """Solve a linear Toeplitz system using Levinson recursion.
 
     Parameters
     ----------
-    a : array, dtype=double or complex128, shape=(2n-1,)
+    a : array, dtype=float, double, complex64 or complex128, shape=(2n-1,)
         The first column of the matrix in reverse order (without the diagonal)
         followed by the first (see below)
-    b : array, dtype=double  or complex128, shape=(n,)
+    b : array, dtype=float, double, complex64  or complex128, shape=(n,)
         The right hand side vector. Both a and b must have the same type
-        (double or complex128).
+        (float, double, complex64 or complex128).
 
     Notes
     -----
@@ -59,22 +59,25 @@ def levinson(const dz[::1] a, const dz[::1] b):
     else:
         dtype = complex128
 
-    cdef ssize_t n, m, j, nmj, k, m2
-    n = b.shape[0]
-    cdef dz x_num, g_num, h_num, x_den, g_den
+    cdef ssize_t n, m, i, j, nmj, k, m2
+    n, nrhs = b.shape[0], b.shape[1]
+    cdef dz g_num, h_num, x_den, g_den
     cdef dz gj, gk, hj, hk, c1, c2
-    cdef dz[:] x = zeros(n, dtype=dtype)  # result
+    cdef dz[:, ::1] x = zeros((n, nrhs), dtype=dtype, order="C")  # result
+    cdef dz[:] x_num = zeros(nrhs, dtype=dtype) # workspace
     cdef dz[:] g = zeros(n, dtype=dtype)  # workspace
     cdef dz[:] h = zeros(n, dtype=dtype)  # workspace
-    cdef dz[:] reflection_coeff = zeros(n+1, dtype=dtype)  # history
+    cdef dz[:, ::1] reflection_coeff = zeros((n+1, nrhs), dtype=dtype, order="C")  # history
     assert len(a) == (2*n) - 1
 
     if a[n-1] == 0:
         raise LinAlgError('Singular principal minor')
 
-    x[0] = b[0] / a[n-1]
-    reflection_coeff[0] = 1
-    reflection_coeff[1] = x[0]
+    for i in range(nrhs):
+        x[0, i] = b[0, i] / a[n-1]
+
+    reflection_coeff[0, :] = 1
+    reflection_coeff[1, :] = x[0, :]
 
     if (n == 1):
         return asarray(x), asarray(reflection_coeff)
@@ -84,20 +87,25 @@ def levinson(const dz[::1] a, const dz[::1] b):
 
     for m in range(1, n):
         # Compute numerator and denominator of x[m]
-        x_num = -b[m]
+        for i in range(nrhs):
+            x_num[i] = -b[m, i]
         x_den = -a[n-1]
         for j in range(m):
             nmj = n + m - (j+1)
-            x_num = x_num + a[nmj] * x[j]
+            for i in range(nrhs):
+                x_num[i] = x_num[i] + a[nmj] * x[j, i]
             x_den = x_den + a[nmj] * g[m-j-1]
         if x_den == 0:
             raise LinAlgError('Singular principal minor')
-        x[m] = x_num / x_den
-        reflection_coeff[m+1] = x[m]
+
+        for i in range(nrhs):
+            x[m, i] = x_num[i] / x_den
+            reflection_coeff[m+1, i] = x[m, i]
 
         # Compute x
         for j in range(m):
-            x[j] = x[j] - x[m] * g[m-j-1]
+            for i in range(nrhs):
+                x[j, i] = x[j, i] - x[m, i] * g[m-j-1]
         if m == n-1:
             return asarray(x), asarray(reflection_coeff)
 

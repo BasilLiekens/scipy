@@ -94,11 +94,13 @@ def test_reflection_coeffs():
 
     y_d_concat = np.concatenate((y_d[-2:0:-1], y_d[:-1]))
     y_z_concat = np.concatenate((y_z[-2:0:-1].conj(), y_z[:-1]))
-    _, ref_d = levinson(y_d_concat, b=y_d[1:])
-    _, ref_z = levinson(y_z_concat, b=y_z[1:])
 
-    assert_allclose(reflection_coeffs_d, ref_d[:-1])
-    assert_allclose(reflection_coeffs_z, ref_z[:-1])
+    # `levinson` requires a 2D rhs and returns 2D solutions
+    _, ref_d = levinson(y_d_concat, b=y_d[1:, None])
+    _, ref_z = levinson(y_z_concat, b=y_z[1:, None])
+
+    assert_allclose(reflection_coeffs_d, ref_d[:-1, 0])
+    assert_allclose(reflection_coeffs_z, ref_z[:-1, 0])
 
 
 @pytest.mark.xfail(reason='Instability of Levinson iteration')
