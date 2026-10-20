@@ -1304,15 +1304,70 @@ void copy_slice(T* dst, const T* slice_ptr, const npy_intp n, const npy_intp m, 
  * The default is to have src and dst of the same size (ldb=-1 means ldb=n).
  */
 template<typename T>
-void copy_slice_F(T* dst, const T* slice_ptr, const npy_intp n, const npy_intp m, const npy_intp s2, const npy_intp s1, npy_intp ldb=-1) {
+void copy_slice_F(T* dst, const T* src, const npy_intp n, const npy_intp m, const npy_intp s2, const npy_intp s1, npy_intp ldb=-1) {
+    // For larger matrices (n >= 8), the array is partitioned as:
+    // [       |   ]
+    // [   A   |   ]
+    // [       | C ]
+    // [-------|   ]
+    // [   B   |   ]
+    //
+    // where A is the largest (k*8)x(k*8) block, for some k <= n/8
+    // and if exist, B is the bottom edge, C is the right pane.
+    // Perform strided reads and sequential writes.
 
-    if (ldb == -1) {ldb = n;}
+    if (ldb == -1) { ldb = n; }
+    const npy_intp s1_norm = s1 / sizeof(T);
+    const npy_intp s2_norm = s2 / sizeof(T);
 
-    for (npy_intp i = 0; i < n; i++) {
-        for (npy_intp j = 0; j < m; j++) {
-            dst[i + j*ldb] = *(slice_ptr + (i*s2/sizeof(T)) + (j*s1/sizeof(T)));  // == src[i*m + j]
+    const int block_size = 8;
+    const int n_max = n & ~(block_size - 1); // Round down to multiple of 8
+    const int m_max = m & ~(block_size - 1);
+
+    // Main 8x8 blocks: reverse pattern (sequential writes, strided reads)
+    for (int rb = 0; rb < n_max; rb += block_size) {
+        for (int cb = 0; cb < m_max; cb += block_size) {
+            const T *src_origin = src + rb * s2_norm + cb * s1_norm;
+            T *dst_origin = dst + rb + cb * ldb; // F-ordered; row + ldb * column
+
+            for (int i = 0; i < block_size; i++) { // column index
+                for (int j = 0; j < block_size; j++) { // row index
+                    dst_origin[j + i * ldb] = src_origin[j * s2_norm + i * s1_norm];
+                }
+            }
         }
     }
+
+    // Handle B and C blocks if present
+    if (n_max < n) {
+        // Bottom edge (remainder rows, cols of A)
+        const int n_remain = n - n_max;
+        for (int cb = 0; cb < m_max; cb += block_size) {
+            const T *src_origin = src + n_max * s2_norm + cb * s1_norm;
+            T *dst_origin = dst + n_max + cb * ldb;
+
+            for (int i = 0; i < block_size; i++) {
+                for (int j = 0; j < n_remain; j++) {
+                    dst_origin[j + i * ldb] = src_origin[j * s2_norm + i * s1_norm];
+                }
+            }
+        }
+    }
+
+    if (m_max < m) {
+        // Right edge + corner (remainder cols, all rows)
+        // Merged to maintain sequential writes pattern
+        const int m_remain = m - m_max;
+        for (int j = 0; j < m_remain; j++) {
+            const T *src_col = src + (m_max + j) * s1_norm;
+            T *dst_col = dst + (m_max + j) * ldb;
+
+            for (int i = 0; i < n; i++) {
+                dst_col[i] = src_col[i * s2_norm];
+            }
+        }
+    }
+
 }
 
 
