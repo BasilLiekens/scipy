@@ -408,28 +408,6 @@ void copy_strided_to_f(T *dst, const T *src, const npy_intp m, const npy_intp n,
             }
         }
     }
-
-    // Walk the source along its smaller stride. The magnitudes are unsigned: NumPy accepts any
-    // stride for a dimension of length 1, INT64_MIN included, and std::abs of it is undefined.
-    // std::uint64_t abs_s0 = s0 < 0 ? 0 - static_cast<std::uint64_t>(s0) : static_cast<std::uint64_t>(s0);
-    // std::uint64_t abs_s1 = s1 < 0 ? 0 - static_cast<std::uint64_t>(s1) : static_cast<std::uint64_t>(s1);
-    // if (abs_s1 <= abs_s0) {
-    //     for (npy_intp i = 0; i < m; i++) {
-    //         const char *src_row = base + i * s0;
-    //         for (npy_intp j = 0; j < n; j++) {
-    //             dst[i + j * ld] = *reinterpret_cast<const T *>(src_row + j * s1);
-    //         }
-    //     }
-    // }
-    // else {
-    //     for (npy_intp j = 0; j < n; j++) {
-    //         const char *src_col = base + j * s1;
-    //         T *dst_col = dst + j * ld;
-    //         for (npy_intp i = 0; i < m; i++) {
-    //             dst_col[i] = *reinterpret_cast<const T *>(src_col + i * s0);
-    //         }
-    //     }
-    // }
 }
 
 
@@ -443,12 +421,64 @@ void copy_strided_to_f(T *dst, const T *src, const npy_intp m, const npy_intp n,
  */
 template<typename T>
 void copy_slice_F_to_C(T* dst, const T* src, const npy_intp m, const npy_intp n, npy_intp ldb=-1) {
+    // For larger matrices (n >= 8), the array is partitioned as:
+    // [       |   ]
+    // [   A   |   ]
+    // [       | C ]
+    // [-------|   ]
+    // [   B   |   ]
+    //
+    // where A is the largest (k*8)x(k*8) block, for some k <= n/8
+    // and if exist, B is the bottom edge, C is the right pane.
+    // Perform strided reads and sequential writes.
 
-    if (ldb == -1) {ldb = m;}
+    if (ldb == -1) { ldb = m; }
 
-    for (npy_intp i = 0; i < m; i++) {
-        for (npy_intp j = 0; j < n; j++) {
-            dst[i*n + j] = src[i + j*ldb];
+    const int block_size = 8;
+    const int m_max = m & ~(block_size - 1); // Round down to multiple of 8
+    const int n_max = n & ~(block_size - 1);
+
+    // Main 8x8 blocks: reverse pattern (sequential writes, strided reads)
+    for (int rb = 0; rb < m_max; rb += block_size) {
+        for (int cb = 0; cb < n_max; cb += block_size) {
+            const T *src_origin = src + rb + cb * ldb;
+            T *dst_origin = dst + n * rb + cb;
+
+            for (int i = 0; i < block_size; i++) { // row index
+                for (int j = 0; j < block_size; j++) { // column index
+                    dst_origin[i * n + j] = src_origin[i + j * ldb];
+                }
+            }
+        }
+    }
+
+    // Handle B and C blocks if present
+    if (m_max < m) {
+        // Bottom edge (remainder rows, cols of A)
+        const int m_remain = m - m_max;
+        for (int cb = 0; cb < n_max; cb += block_size) {
+            const T *src_origin = src + m_max + cb * ldb;
+            T *dst_origin = dst + n * m_max + cb;
+
+            for (int i = 0; i < m_remain; i++) {
+                for (int j = 0; j < block_size; j++) {
+                    dst_origin[i * n + j] = src_origin[i + j * ldb];
+                }
+            }
+        }
+    }
+
+    if (n_max < n) {
+        // Right edge + corner (remainder cols, all rows)
+        // Merged to maintain sequential writes pattern
+        const int n_remain = n - n_max;
+        for (int i = 0; i < m; i++) {
+            const T *src_row = src + i + n_max * ldb;
+            T *dst_row = dst + n * i + n_max;
+
+            for (int j = 0; j < n_remain; j++) {
+                dst_row[j] = src_row[j * ldb];
+            }
         }
     }
 }
