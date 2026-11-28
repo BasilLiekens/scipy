@@ -875,6 +875,7 @@ static PyObject *
 _linalg_matrix_norm(PyObject* Py_UNUSED(dummy), PyObject* args) {
     PyArrayObject *ap_Am = NULL;
     Py_ssize_t ord_index = 0;
+    SliceStatusVec vec_status;
 
     if (!PyArg_ParseTuple(args, "O!|i", &PyArray_Type, (PyArrayObject **)&ap_Am, &ord_index)) {
         return NULL;
@@ -913,12 +914,14 @@ _linalg_matrix_norm(PyObject* Py_UNUSED(dummy), PyObject* args) {
     Py_BEGIN_ALLOW_THREADS
     status = dispatch_dtype(typenum, [&](auto tag) {
         using T = decltype(tag);
-        return _matrix_norm<T>(ap_Am, ap_res.get(), ord);
+        return _matrix_norm<T>(ap_Am, ap_res.get(), ord, vec_status);
     });
     Py_END_ALLOW_THREADS
     if (status.code != BatchCode::ok) { return set_batch_error(status, "matrix_norm", typenum); }
 
-    return Py_BuildValue("N", PyArray_Return(ap_res.release()));
+    PyObject *ret_lst = convert_vec_status(vec_status);
+    if (!ret_lst) { return NULL; }
+    return Py_BuildValue("NN", PyArray_Return(ap_res.release()), ret_lst);
 }
 
 /*

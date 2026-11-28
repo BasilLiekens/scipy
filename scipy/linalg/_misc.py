@@ -288,7 +288,7 @@ def matrix_norm(a, keepdims=False, ord="fro", check_finite=True):
         the option keepdims.
     """
     # keep in sync with the C++ side
-    order = {
+    ord_mapping = {
         "fro"   : 0,
         "nuc"   : 1,
         1       : 10,
@@ -297,7 +297,13 @@ def matrix_norm(a, keepdims=False, ord="fro", check_finite=True):
         -2      : 21,
         np.inf  : 30,
         -np.inf : 31,
-    }.get(ord, None)
+    }
+    order = ord_mapping.get(ord, None)
+
+    if order is None:
+        raise ValueError(
+            f"Unknown matrix norm, supported norms are {ord_mapping.keys()}"
+        )
 
     a1 = _asarray_validated(a, check_finite=check_finite)
     _deprecate_dtypes("matrix_norm", a1)
@@ -312,12 +318,15 @@ def matrix_norm(a, keepdims=False, ord="fro", check_finite=True):
         else:
             return np.zeros(res_shape, dtype=np.finfo(a1.dtype).dtype)
 
-    if order is not None:
-        res = _matrix_norm(a1, order)
-        return res.reshape(res.shape + (() if not keepdims else (1, 1)))
+    res, err_lst = _matrix_norm(a1, order)
+    if err_lst:
+        msgs = [
+            f"Slice {i} returned LAPACK info {dct["lapack_info"]}"
+            for i, dct in enumerate(err_lst)
+        ]
+        raise ValueError(", ".join(msgs))
 
-    else: # fall back to NumPy
-        return np.linalg.matrix_norm(a1, ord=ord, keepdims=keepdims)
+    return res.reshape(res.shape + (() if not keepdims else (1, 1)))
 
 
 def _datacopied(arr, original):

@@ -7,8 +7,7 @@ namespace sp_linalg {
 
 
 // Which matrix norm to compute; python side maps to these values
-enum Matrix_norm_ord : Py_ssize_t
-{
+enum class Matrix_norm_ord : Py_ssize_t {
     m_fro       = 0,
     m_nuc       = 1,
     m_one       = 10,
@@ -28,7 +27,7 @@ enum Matrix_norm_ord : Py_ssize_t
  * @param incx  The increment between subsequent elements in bytes.
  * @param neg   Whether to compute the + or - 1 norm.
  */
-template <typename T, bool neg> inline real_of_t<T> _vector_norm_1(const T *data, const CBLAS_INT n, const CBLAS_INT incx) {
+template <typename T, bool neg> inline real_of_t<T> _vector_norm_1(const T *data, const npy_intp n, const npy_intp incx) {
     const char *base = reinterpret_cast<const char *>(data);
 
     real_of_t<T> res = 0.0;
@@ -59,7 +58,7 @@ template <typename T, bool neg> inline real_of_t<T> _vector_norm_1(const T *data
  * @param incx  The increment between subsequent elements in bytes.
  * @param neg   Whether to compute the + or - 2 norm.
  */
-template <typename T, bool neg> inline real_of_t<T> _vector_norm_2(const T *data, const CBLAS_INT n, const CBLAS_INT incx) {
+template <typename T, bool neg> inline real_of_t<T> _vector_norm_2(const T *data, const npy_intp n, const npy_intp incx) {
     const char *base = reinterpret_cast<const char *>(data);
 
     real_of_t<T> res = 0.0;
@@ -98,7 +97,7 @@ template <typename T, bool neg> inline real_of_t<T> _vector_norm_2(const T *data
  *
  * @return the p norm
  */
-template <typename T> inline real_of_t<T> _vector_norm_general(const T *data, const f64 p, const CBLAS_INT n, const CBLAS_INT incx) {
+template <typename T> inline real_of_t<T> _vector_norm_general(const T *data, const f64 p, const npy_intp n, const npy_intp incx) {
     const char *base = reinterpret_cast<const char *>(data);
 
     real_of_t<T> res = 0.0;
@@ -122,7 +121,7 @@ template <typename T> inline real_of_t<T> _vector_norm_general(const T *data, co
  * @param s1    The strides along the column dimension, in bytes.
  * @param neg   Whether to compute the positive or negative norm.
  */
-template <typename T, bool neg> inline real_of_t<T> _matrix_norm_F(const T *data, const CBLAS_INT m, const CBLAS_INT n, const CBLAS_INT s0, const CBLAS_INT s1) {
+template <typename T, bool neg> inline real_of_t<T> _matrix_norm_F(const T *data, const npy_intp m, const npy_intp n, const npy_intp s0, const npy_intp s1) {
     const char *base = reinterpret_cast<const char *>(data);
 
     real_of_t<T> res = 0.0;
@@ -159,7 +158,7 @@ template <typename T, bool neg> inline real_of_t<T> _matrix_norm_F(const T *data
  * @param s1    Strides along the column dimension in bytes.
  * @param neg   Whether the compute the +1 or -1 norm.
  */
-template <typename T, bool neg> inline real_of_t<T> _matrix_norm_1(const T *data, const CBLAS_INT m, const CBLAS_INT n, const CBLAS_INT s0, const CBLAS_INT s1) {
+template <typename T, bool neg> inline real_of_t<T> _matrix_norm_1(const T *data, const npy_intp m, const npy_intp n, const npy_intp s0, const npy_intp s1) {
     const char *base = reinterpret_cast<const char *>(data);
 
     real_of_t<T> res;
@@ -188,8 +187,6 @@ template <typename T, bool neg> inline real_of_t<T> _matrix_norm_1(const T *data
 
 
 template <typename T> BatchStatus _vector_norm(PyArrayObject *ap_av, PyArrayObject *ap_res, f64 ord) {
-    using real_type = real_of_t<T>;
-
     // -------------------------------------------------------------------
     // Input array attributes
     // -------------------------------------------------------------------
@@ -198,17 +195,21 @@ template <typename T> BatchStatus _vector_norm(PyArrayObject *ap_av, PyArrayObje
     npy_intp *strides = PyArray_STRIDES(ap_av);
     npy_intp *shape = PyArray_DIMS(ap_av);
 
-    real_type *res_data = (real_type *)PyArray_DATA(ap_res);
+    real_of_t<T> *res_data = reinterpret_cast<real_of_t<T> *>(PyArray_DATA(ap_res));
 
     npy_intp outer_size = 1;
     for (int i = 0; i < ndim - 1; i++) { outer_size *= shape[i]; }
+
+    // Data is bound to existing array and addressing happens using `npy_intp`,
+    // hence no need for `checked_narrow`.
 
     // -------------------------------------------------------------------
     // Batching loop
     // -------------------------------------------------------------------
     T *slice_ptr_a = NULL;
-    CBLAS_INT intn = shape[ndim-1];
-    CBLAS_INT incx = strides[ndim-1];
+    npy_intp intn = shape[ndim-1];
+    npy_intp incx = strides[ndim-1];
+
     for (npy_intp idx = 0; idx < outer_size; idx++) {
         // The slices are vectors and `compute_slice_ptr` assumes matrices
         slice_ptr_a = compute_slice_ptr<T>(idx, A_data, ndim + 1, shape, strides);
@@ -235,9 +236,7 @@ template <typename T> BatchStatus _vector_norm(PyArrayObject *ap_av, PyArrayObje
 }
 
 
-template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObject *ap_res, Matrix_norm_ord ord) {
-    using real_type = real_of_t<T>;
-
+template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObject *ap_res, Matrix_norm_ord ord, SliceStatusVec& vec_status) {
     // -------------------------------------------------------------------
     // Input array attributes
     // -------------------------------------------------------------------
@@ -246,7 +245,7 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
     npy_intp *strides = PyArray_STRIDES(ap_Am);
     npy_intp *shape = PyArray_SHAPE(ap_Am);
 
-    real_type *res_data = (real_type *)PyArray_DATA(ap_res);
+    real_of_t<T> *res_data = reinterpret_cast<real_of_t<T> *>(PyArray_DATA(ap_res));
 
     npy_intp outer_size = 1;
     for (int i = 0; i < ndim - 2; i++) { outer_size *= shape[i]; }
@@ -259,11 +258,17 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
 
     char jobu = 'N', jobvt = 'N';
     char range = (ord == Matrix_norm_ord::m_nuc) ? 'A' : 'I';
-    CBLAS_INT m = shape[ndim - 2], n = shape[ndim - 1];
+
+    npy_intp m = shape[ndim - 2], n = shape[ndim - 1];
+    CBLAS_INT intm, intn;
+    if (!checked_narrow<CBLAS_INT>(m, &intm) || !checked_narrow<CBLAS_INT>(n, &intn)) {
+        return {BatchCode::too_large, nullptr, std::max(m, n)};
+    }
+
     CBLAS_INT min_mn = std::min(m, n);
-    real_of_t<T> vl = 0, vu = 0;
     CBLAS_INT il = (ord == Matrix_norm_ord::m_two) ? 1 : min_mn;
     CBLAS_INT iu = il;
+    real_of_t<T> vl = 0, vu = 0;
     CBLAS_INT ns = 0;
     T tmp = 0;
     CBLAS_INT info = 0;
@@ -279,9 +284,9 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
         iwork = alloc_workspace<CBLAS_INT>(12 * min_mn);
 
         if constexpr (!is_complex_v<T>) {
-            lapack::gesvdx(jobu, jobvt, range, m, n, NULL, m, vl, vu, il, iu, &ns, NULL, NULL, m, NULL, n, &tmp, -1, iwork.get(), &info);
+            lapack::gesvdx(jobu, jobvt, range, intm, intn, NULL, intm, vl, vu, il, iu, &ns, NULL, NULL, intm, NULL, intn, &tmp, -1, iwork.get(), &info);
         } else {
-            lapack::gesvdx(jobu, jobvt, range, m, n, NULL, m, vl, vu, il, iu, &ns, NULL, NULL, m, NULL, n, &tmp, -1, rwork.get(), iwork.get(), &info);
+            lapack::gesvdx(jobu, jobvt, range, intm, intn, NULL, intm, vl, vu, il, iu, &ns, NULL, NULL, intm, NULL, intn, &tmp, -1, rwork.get(), iwork.get(), &info);
         }
 
         if (info != 0) { return {BatchCode::lapack_error, "gesvdx", info}; }
@@ -314,14 +319,15 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
     // Main batching loop
     // -------------------------------------------------------------------
     T *slice_ptr_A = NULL;
+    SliceStatus slice_status;
     real_of_t<T> res = 0;
-    real_type *res_ptr = res_data;
-    CBLAS_INT intm = shape[ndim - 2], intn = shape[ndim - 1];
+    real_of_t<T> *res_ptr = res_data;
 
-    CBLAS_INT s0 = strides[ndim - 2];
-    CBLAS_INT s1 = strides[ndim - 1];
+    npy_intp s0 = strides[ndim - 2];
+    npy_intp s1 = strides[ndim - 1];
 
     for (npy_intp idx = 0; idx < outer_size; idx++) {
+        init_status(slice_status, idx, St::GENERAL);
         slice_ptr_A = compute_slice_ptr<T>(idx, A_data, ndim, shape, strides);
 
         switch (ord) {
@@ -332,9 +338,9 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
             case Matrix_norm_ord::m_nuc:
                 copy_strided_to_f(data_A, slice_ptr_A, m, n, s0, s1, m);
                 if constexpr (!is_complex_v<T>) {
-                    lapack::gesvdx(jobu, jobvt, range, m, n, data_A, m, vl, vu, il, iu, &ns, data_S, NULL, m, NULL, n, work, lwork, iwork.get(), &info);
+                    lapack::gesvdx(jobu, jobvt, range, intm, intn, data_A, intm, vl, vu, il, iu, &ns, data_S, NULL, intm, NULL, intn, work, lwork, iwork.get(), &info);
                 } else {
-                    lapack::gesvdx(jobu, jobvt, range, m, n, data_A, m, vl, vu, il, iu, &ns, data_S, NULL, m, NULL, n, work, lwork, rwork.get(), iwork.get(), &info);
+                    lapack::gesvdx(jobu, jobvt, range, intm, intn, data_A, intm, vl, vu, il, iu, &ns, data_S, NULL, intm, NULL, intn, work, lwork, rwork.get(), iwork.get(), &info);
                 }
                 res = 0;
                 for (npy_intp i = 0; i < min_mn; i++) { res += data_S[i]; }
@@ -352,9 +358,9 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
             case Matrix_norm_ord::m_two:
                 copy_strided_to_f(data_A, slice_ptr_A, m, n, s0, s1, m);
                 if constexpr (!is_complex_v<T>) {
-                    lapack::gesvdx(jobu, jobvt, range, m, n, data_A, m, vl, vu, il, iu, &ns, data_S, NULL, m, NULL, n, work, lwork, iwork.get(), &info);
+                    lapack::gesvdx(jobu, jobvt, range, intm, intn, data_A, intm, vl, vu, il, iu, &ns, data_S, NULL, intm, NULL, intn, work, lwork, iwork.get(), &info);
                 } else {
-                    lapack::gesvdx(jobu, jobvt, range, m, n, data_A, m, vl, vu, il, iu, &ns, data_S, NULL, m, NULL, n, work, lwork, rwork.get(), iwork.get(), &info);
+                    lapack::gesvdx(jobu, jobvt, range, intm, intn, data_A, intm, vl, vu, il, iu, &ns, data_S, NULL, intm, NULL, intn, work, lwork, rwork.get(), iwork.get(), &info);
                 }
                 res_ptr[idx] = data_S[0];
                 break;
@@ -362,9 +368,9 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
             case Matrix_norm_ord::m_neg_two:
                 copy_strided_to_f(data_A, slice_ptr_A, m, n, s0, s1, m);
                 if constexpr (!is_complex_v<T>) {
-                    lapack::gesvdx(jobu, jobvt, range, m, n, data_A, m, vl, vu, il, iu, &ns, data_S, NULL, m, NULL, n, work, lwork, iwork.get(), &info);
+                    lapack::gesvdx(jobu, jobvt, range, intm, intn, data_A, intm, vl, vu, il, iu, &ns, data_S, NULL, intm, NULL, intn, work, lwork, iwork.get(), &info);
                 } else {
-                    lapack::gesvdx(jobu, jobvt, range, m, n, data_A, m, vl, vu, il, iu, &ns, data_S, NULL, m, NULL, n, work, lwork, rwork.get(), iwork.get(), &info);
+                    lapack::gesvdx(jobu, jobvt, range, intm, intn, data_A, intm, vl, vu, il, iu, &ns, data_S, NULL, intm, NULL, intn, work, lwork, rwork.get(), iwork.get(), &info);
                 }
                 res_ptr[idx] = data_S[0];
                 break;
@@ -377,9 +383,13 @@ template <typename T> BatchStatus _matrix_norm(PyArrayObject *ap_Am, PyArrayObje
             case Matrix_norm_ord::m_neg_inf:
                 res_ptr[idx] = _matrix_norm_1<T, true>(slice_ptr_A, intn, intm, s1, s0);
                 break;
+        }
 
-            default: // Unknown enum
-                return {BatchCode::lapack_error, "matrix_norm", -102};
+        if (info != 0) {
+            slice_status.lapack_info = info;
+            vec_status.push_back(slice_status);
+
+            return {};
         }
     }
 
